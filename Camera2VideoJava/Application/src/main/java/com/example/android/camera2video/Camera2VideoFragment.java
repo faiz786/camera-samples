@@ -37,6 +37,9 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaFormat;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -57,6 +60,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -66,6 +70,29 @@ import java.util.concurrent.TimeUnit;
 
 public class Camera2VideoFragment extends Fragment
         implements View.OnClickListener, FragmentCompat.OnRequestPermissionsResultCallback {
+
+    static final int STATUS_NONE = 0;
+    static final int STATUS_OPENING = 1;
+    static final int STATUS_RUNNING = 2;
+    static final int STATUS_CLOSING = 3;
+    static final int STATUS_CLOSED = 4;
+    static final int Factor = 1;
+
+    public String sSelectedCamera;
+
+    public int sCameraOrientation = -1;
+
+    public final String VideoCodec = MediaFormat.MIMETYPE_VIDEO_AVC;
+    public final int VideoWidthsend = 640 / Factor; // 640
+    public final int VideoHeightsend = 480 / Factor;
+    public final int VideoWidthRecieve = 480 / Factor; // 640
+    public final int VideoHeightReceive = 640 / Factor;
+
+    private int current_Camera = 0;
+
+    private float degrees;
+
+    public VideoInputThread mVideoInputThread;
 
     private static final int SENSOR_ORIENTATION_DEFAULT_DEGREES = 90;
     private static final int SENSOR_ORIENTATION_INVERSE_DEGREES = 270;
@@ -304,6 +331,20 @@ public class Camera2VideoFragment extends Fragment
         super.onPause();
     }
 
+    void setupCapture() {
+
+        if (sSelectedCamera == null)
+            sSelectedCamera = findCamera(CameraCharacteristics.LENS_FACING_BACK);
+        // if (mVideoInputThread != null)
+        // if (mVideoInputThread.isAlive()) {
+        // mVideoInputThread.close();
+        // mVideoInputThread.interrupt();
+        // mVideoInputThread = null;
+        // }
+        mVideoInputThread = new VideoInputThread();
+        mVideoInputThread.open();
+    }
+
     @Override
     public void onClick(View view) {
         switch (view.getId()) {
@@ -311,7 +352,8 @@ public class Camera2VideoFragment extends Fragment
                 if (mIsRecordingVideo) {
                     stopRecordingVideo();
                 } else {
-                    startRecordingVideo();
+//                    startRecordingVideo();
+                    setupCapture();
                 }
                 break;
             }
@@ -758,6 +800,453 @@ public class Camera2VideoFragment extends Fragment
                     .create();
         }
 
+    }
+
+
+    class VideoInputThread extends HandlerThread {
+
+        Handler mHandler;
+        CameraDevice mCamera;
+        CameraCaptureSession mCameraCaptureSession;
+        MediaCodec mVideoEncoder;
+        VideoEncoderCore videoEncoderCore;
+
+        {
+            try {
+                videoEncoderCore = new VideoEncoderCore(VideoWidthsend,VideoHeightsend,400000/Factor,null);
+            } catch (IOException e) {
+                e.printStackTrace();
+                System.out.println("exception while creating video encoder"+e.getMessage());
+            }
+        }
+
+        int mStatus;
+
+        public VideoInputThread() {
+
+            super("Video Input");
+            super.start();
+            mHandler = new Handler(getLooper());
+        }
+
+        public void open() {
+
+            mHandler.post(() -> {
+
+                android.util.Log.w(TAG, "+open VideoInput");
+                mStatus = STATUS_OPENING;
+                openVideoInput(sSelectedCamera, false);
+                mStatus = STATUS_RUNNING;
+            });
+        }
+
+        public void startVideoEncoder() {
+
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    android.util.Log.w(TAG, "+startEncoder: ");
+                    if (videoEncoderCore.mEncoder == null) {
+                        openVideoEncoder();
+                    }
+                }
+            });
+        }
+
+        public void close() {
+            // try {
+
+            if (mStatus == STATUS_RUNNING) {
+                // if (mHandler.getLooper().getThread().isAlive()) {
+                // this.interrupt();
+
+                mHandler.post(() -> {
+
+                    mStatus = STATUS_CLOSING;
+
+                    // try {
+                    // mCameraOpenCloseLock.acquire();
+
+                    if (null != mCameraCaptureSession) {
+                        // try {
+                        // mCameraCaptureSession.stopRepeating();
+                        // mCameraCaptureSession.abortCaptures();
+                        // } catch (CameraAccessException e) {
+                        // e.printStackTrace();
+                        // }
+                        mCameraCaptureSession.close();
+                        mCameraCaptureSession = null;
+                    }
+
+                    if (null != mCamera) {
+                        mCamera.close();
+                        mCamera = null;
+                    }
+
+//                    if (mVideoEncoder != null) {
+//                        mVideoEncoder.release();
+//                        mVideoEncoder = null;
+//                    }
+
+                    if(videoEncoderCore != null)
+                    {
+                        videoEncoderCore.release();
+                        videoEncoderCore.mEncoder = null;
+                    }
+
+                    stopBackgroundThread();
+                    mStatus = STATUS_CLOSED;
+                    // } catch (InterruptedException e) {
+                    // e.printStackTrace();
+                    // } finally {
+                    // mCameraOpenCloseLock.release();
+                    // }
+                });
+                waitUntilClosed();
+            }
+            // setupRender();
+
+            // } catch (Exception e) {
+            // e.printStackTrace();
+            // mStatus = STATUS_CLOSED;
+            // }
+
+        }
+
+        public void close_video_encoder() {
+            // try {
+
+            // if (mStatus == STATUS_RUNNING) {
+            // // if (mHandler.getLooper().getThread().isAlive()) {
+            // // this.interrupt();
+            // mHandler.post(new Runnable() {
+            // @Override
+            // public void run() {
+
+            // mStatus = STATUS_CLOSING;
+
+            // if (mCamera != null) {
+            // mCamera.close();
+            // mCamera = null;
+            // }
+
+            if (videoEncoderCore.mEncoder != null) {
+                videoEncoderCore.mEncoder.release();
+                videoEncoderCore.mEncoder = null;
+            }
+
+            // quit();
+            // mStatus = STATUS_CLOSED;
+            // }
+            // });
+            // waitUntilClosed();
+            // }
+            // setupRender();
+
+            // } catch (Exception e) {
+            // e.printStackTrace();
+            // mStatus = STATUS_CLOSED;
+            // }
+
+        }
+
+        public void waitUntilClosed() {
+
+            if (mStatus == STATUS_NONE)
+                return;
+
+            try {
+
+                int timeWaited = 0;
+                while (mStatus != STATUS_CLOSED) {
+                    if (timeWaited <= 5000) {
+                        Thread.sleep(10);
+                        // Log.w("Camera wait", "waiting..");
+                        timeWaited = timeWaited + 10;
+                    } else {
+
+                        if (videoEncoderCore.mEncoder != null) {
+                            videoEncoderCore.mEncoder.release();
+                            videoEncoderCore.mEncoder = null;
+                        }
+                        stopBackgroundThread();
+                        mStatus = STATUS_CLOSED;
+                    }
+
+                }
+            } catch (InterruptedException ex) {
+                Log.w("Camera wait", "waiting.." + ex.getMessage());
+            }
+        }
+
+        private void openVideoInput(String cameraName, boolean iscamera_switching) {
+
+            try {
+
+                android.util.Log.w(TAG, "+openVideoInput: " + cameraName);
+
+                final CameraManager cameraManager = (CameraManager) getActivity()
+                        .getSystemService(Context.CAMERA_SERVICE);
+
+                final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
+
+                    @Override
+                    public void onOpened(@NonNull CameraDevice camera) {
+                        Log.e("onOpened", "Camera onOpened");
+
+                        mCamera = camera;
+                        openVideoEncoder();
+
+                        // mCameraOpenCloseLock.release();
+                        // if (null != mTextureView) {
+                        // configureTransform(mTextureView.getWidth(), mTextureView.getHeight());
+
+                    }
+
+                    @Override
+                    public void onDisconnected(@NonNull CameraDevice camera) {
+                        Log.e("onDisconnected", "Camera onDisconnected");
+                        // mCameraOpenCloseLock.release();
+                        if (mCameraCaptureSession != null) {
+
+                            mCameraCaptureSession.close();
+                            mCameraCaptureSession = null;
+                        }
+                        camera.close();
+                        mCamera = null;
+                    }
+
+                    @Override
+                    public void onError(@NonNull CameraDevice camera, int error) {
+                        Log.e("onError", "Camera onError");
+                        // mCameraOpenCloseLock.release();
+                        if (mCameraCaptureSession != null) {
+
+                            mCameraCaptureSession.close();
+                            mCameraCaptureSession = null;
+                        }
+                        camera.close();
+                        mCamera = null;
+                        // stopBackgroundThread();
+                        // onCameraSwitchclicked();
+                    }
+
+                    @Override
+                    public void onClosed(@NonNull CameraDevice camera) {
+                        Log.e("onClosed", "Camera onClosed");
+                        super.onClosed(camera);
+                        if (mCameraCaptureSession != null) {
+
+                            mCameraCaptureSession.close();
+                            mCameraCaptureSession = null;
+                        }
+                        mCamera = null;
+                        // mStatus=
+
+                    }
+                };
+
+                startBackgroundThread();
+                cameraManager.openCamera(cameraName, stateCallback, mBackgroundHandler);
+                // cameraManager.openCamera(cameraName, stateCallback, null);
+
+                // try {
+                // if (!mCameraOpenCloseLock.tryAcquire(3000, TimeUnit.MILLISECONDS)) {
+                // throw new RuntimeException("Time out waiting to lock camera opening.");
+                // }
+                // cameraManager.openCamera(cameraName, stateCallback, mBackgroundHandler);
+                // } catch (InterruptedException e) {
+                // throw new RuntimeException("Interrupted while trying to lock camera
+                // opening.", e);
+                // }
+
+            } catch (SecurityException | NullPointerException | CameraAccessException ex) {
+                android.util.Log.e(TAG, "Error in openVideoInput: " + android.util.Log.getStackTraceString(ex));
+            }
+        }
+
+        private void startBackgroundThread() {
+            mBackgroundThread = new HandlerThread("CameraBackground");
+            mBackgroundThread.start();
+            mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+        }
+
+        /**
+         * Stops the background thread and its {@link Handler}.
+         */
+        private void stopBackgroundThread() {
+            if (mBackgroundThread != null) {
+                mBackgroundThread.quitSafely();
+                try {
+                    mBackgroundThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                mBackgroundThread = null;
+                mBackgroundHandler = null;
+            }
+        }
+
+        private void openVideoEncoder() {
+
+            try {
+
+//                packet_id = 0;
+                MediaFormat format = MediaFormat.createVideoFormat(VideoCodec, VideoWidthsend, VideoHeightsend);
+                format.setInteger(MediaFormat.KEY_BIT_RATE, 400000 / Factor); // 1600000
+                format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+                format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
+                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);// 2
+
+//                mVideoEncoder = MediaCodec.createEncoderByType(VideoCodec);
+//                mVideoEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+
+                videoEncoderCore.mEncoder.setCallback(new MediaCodec.Callback() {
+                    @Override
+                    public void onInputBufferAvailable( MediaCodec codec, int index) {
+                    }
+
+                    @Override
+                    public void onOutputBufferAvailable( MediaCodec codec, int index,
+                                                         MediaCodec.BufferInfo info) {
+                        ByteBuffer buf = codec.getOutputBuffer(index);
+                        System.out.println("buffer available from camera"+info);
+                        //
+                        byte[] tmp = new byte[info.size];
+                        buf.get(tmp);
+                        // mVideoOutputThread.render( info.flags,tmp);
+                        if (info.flags == 2) {
+
+//                            callInfoBeanObj.setCall_SenderConfig(tmp);
+                        } else {
+
+//                            send_command(tmp, info.flags);
+
+                        }
+                        codec.releaseOutputBuffer(index, false);
+                    }
+
+                    @Override
+                    public void onError( MediaCodec codec,  MediaCodec.CodecException e) {
+                        android.util.Log.w(TAG, "videoEncoderCore.mEncoder.onError: " + e);
+                    }
+
+                    @Override
+                    public void onOutputFormatChanged( MediaCodec codec,  MediaFormat format) {
+                        // set camera change
+                        try {
+                            current_Camera = Integer.parseInt(mCamera.getId());
+                        }catch (Exception e)
+                        {
+                            System.out.println("exeption in camera:"+e.getMessage());
+                        }
+                    }
+                });
+//                Surface encoderSurface = videoEncoderCore.mEncoder.createInputSurface();
+                Surface encoderSurface = videoEncoderCore.getInputSurface();
+                videoEncoderCore.mEncoder.start();
+
+                List<Surface> surfaces = new ArrayList<>();
+                surfaces.add(encoderSurface);
+
+                // Creating surface from texture to display my video
+//                try {
+//                    while (mPeerSurfaceTextureMyself == null)
+//                        Thread.sleep(1);
+//                } catch (InterruptedException ex) {
+//                    return;
+//                }
+                Surface mSurfaceMyself = new Surface(mTextureView.getSurfaceTexture());
+                surfaces.add(mSurfaceMyself);
+
+                CaptureRequest.Builder builder = mCamera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                // builder.setRepeatingRequest(builder.build(), yourCaptureCallback,
+                // yourBackgroundHandler);
+                // builder.addTarget(encoderSurface);
+                for (Surface s : surfaces)
+                    builder.addTarget(s);
+
+                final CaptureRequest captureRequest = builder.build();
+
+                mCamera.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+
+                    @Override
+                    public void onConfigured(@NonNull CameraCaptureSession session) {
+                        if (null == mCamera) {
+                            return;
+                        }
+                        mCameraCaptureSession = session;
+                        try {
+
+                            setUpCaptureRequestBuilder(builder);
+                            HandlerThread thread = new HandlerThread("CameraPreview");
+                            thread.start();
+                            // session.setRepeatingRequest(captureRequest, null, mBackgroundHandler);
+                            session.setRepeatingRequest(builder.build(), null, mBackgroundHandler);
+                        } catch (CameraAccessException ex) {
+
+                            mCameraCaptureSession = null;
+                            android.util.Log.e(TAG, "Error in setRepeatingRequest: " + ex);
+                        } catch (IllegalStateException ex) {
+
+                            mCameraCaptureSession = null;
+                            android.util.Log.e(TAG, "Error in setRepeatingRequest: " + ex);
+                        }
+                    }
+
+                    @Override
+                    public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                        mCameraCaptureSession = null;
+                        android.util.Log.e(TAG, "onConfigureFailed");
+                    }
+
+                }, mBackgroundHandler);
+
+            } catch ( CameraAccessException ex) {
+                android.util.Log.e(TAG, "Error in openVideoEncoder: " + android.util.Log.getStackTraceString(ex));
+            }
+        }
+
+        private void setUpCaptureRequestBuilder(CaptureRequest.Builder builder) {
+            builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+        }
+    }
+
+    private String findCamera(int facing_switch) {
+
+        try {
+            CameraManager cameraManager = (CameraManager) getActivity().getSystemService(Context.CAMERA_SERVICE);
+            String[] cams = new String[0];
+            cams = cameraManager.getCameraIdList();
+            String selectedCam = null;
+            for (String name : cams) {
+
+                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(name);
+                int facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                if (facing_switch == CameraCharacteristics.LENS_FACING_BACK
+                        && facing == CameraCharacteristics.LENS_FACING_BACK) {
+
+                    selectedCam = name;
+                    sCameraOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                    degrees = 90.0f;
+                    break;
+                } else if (facing_switch == CameraCharacteristics.LENS_FACING_FRONT
+                        && facing == CameraCharacteristics.LENS_FACING_FRONT) {
+
+                    selectedCam = name;
+                    sCameraOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                    degrees = 270.0f;
+                    break;
+                } else if (selectedCam == null)
+                    selectedCam = name;
+
+            }
+            return selectedCam;
+        } catch (CameraAccessException | NullPointerException ex) {
+
+            android.util.Log.e("Video Call", "Error in findCamera: " + android.util.Log.getStackTraceString(ex));
+            return null;
+        }
     }
 
 }
