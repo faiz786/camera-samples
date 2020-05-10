@@ -29,6 +29,7 @@ import android.content.res.Configuration;
 import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.hardware.Camera;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -136,6 +137,8 @@ public class Camera2VideoFragment extends Fragment
      * A reference to the opened {@link android.hardware.camera2.CameraDevice}.
      */
     private CameraDevice mCameraDevice;
+
+    Camera camera;
 
     /**
      * A reference to the current {@link android.hardware.camera2.CameraCaptureSession} for
@@ -809,11 +812,12 @@ public class Camera2VideoFragment extends Fragment
         CameraDevice mCamera;
         CameraCaptureSession mCameraCaptureSession;
         MediaCodec mVideoEncoder;
-        VideoEncoderCore videoEncoderCore;
+        VideoEncoderCore videoEncoderCore,videoEncoderCore2;
 
         {
             try {
                 videoEncoderCore = new VideoEncoderCore(VideoWidthsend,VideoHeightsend,400000/Factor,null);
+                videoEncoderCore2 = new VideoEncoderCore(VideoWidthsend,VideoHeightsend,256000/Factor);
             } catch (IOException e) {
                 e.printStackTrace();
                 System.out.println("exception while creating video encoder"+e.getMessage());
@@ -985,6 +989,22 @@ public class Camera2VideoFragment extends Fragment
 
                 android.util.Log.w(TAG, "+openVideoInput: " + cameraName);
 
+//                camera = Camera.open();
+//
+//                camera.setPreviewCallback(new Camera.PreviewCallback() {
+//                    @Override
+//                    public void onPreviewFrame(byte[] bytes, Camera camera) {
+//
+//                    }
+//                });
+//
+//                camera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+//                    @Override
+//                    public void onPreviewFrame(byte[] bytes, Camera camera) {
+//
+//                    }
+//                });
+
                 final CameraManager cameraManager = (CameraManager) getActivity()
                         .getSystemService(Context.CAMERA_SERVICE);
 
@@ -1114,15 +1134,57 @@ public class Camera2VideoFragment extends Fragment
                         //
                         byte[] tmp = new byte[info.size];
                         buf.get(tmp);
-                        // mVideoOutputThread.render( info.flags,tmp);
-                        if (info.flags == 2) {
+//                        // mVideoOutputThread.render( info.flags,tmp);
+//                        if (info.flags == 2) {
+//
+////                            callInfoBeanObj.setCall_SenderConfig(tmp);
+//                        } else {
+//
+////                            send_command(tmp, info.flags);
+//
+//                        }
+                        codec.releaseOutputBuffer(index, false);
+                    }
 
-//                            callInfoBeanObj.setCall_SenderConfig(tmp);
-                        } else {
+                    @Override
+                    public void onError( MediaCodec codec,  MediaCodec.CodecException e) {
+                        android.util.Log.w(TAG, "videoEncoderCore.mEncoder.onError: " + e);
+                    }
 
-//                            send_command(tmp, info.flags);
-
+                    @Override
+                    public void onOutputFormatChanged( MediaCodec codec,  MediaFormat format) {
+                        // set camera change
+                        try {
+                            current_Camera = Integer.parseInt(mCamera.getId());
+                        }catch (Exception e)
+                        {
+                            System.out.println("exeption in camera:"+e.getMessage());
                         }
+                    }
+                });
+
+                videoEncoderCore2.mEncoder.setCallback(new MediaCodec.Callback() {
+                    @Override
+                    public void onInputBufferAvailable( MediaCodec codec, int index) {
+                    }
+
+                    @Override
+                    public void onOutputBufferAvailable( MediaCodec codec, int index,
+                                                         MediaCodec.BufferInfo info) {
+                        ByteBuffer buf = codec.getOutputBuffer(index);
+                        System.out.println("buffer available from camera 2"+info);
+                        //
+                        byte[] tmp = new byte[info.size];
+                        buf.get(tmp);
+//                        // mVideoOutputThread.render( info.flags,tmp);
+//                        if (info.flags == 2) {
+//
+////                            callInfoBeanObj.setCall_SenderConfig(tmp);
+//                        } else {
+//
+////                            send_command(tmp, info.flags);
+//
+//                        }
                         codec.releaseOutputBuffer(index, false);
                     }
 
@@ -1144,9 +1206,13 @@ public class Camera2VideoFragment extends Fragment
                 });
 //                Surface encoderSurface = videoEncoderCore.mEncoder.createInputSurface();
                 Surface encoderSurface = videoEncoderCore.getInputSurface();
+                Surface encoderSurface1 = videoEncoderCore2.getInputSurface();
+                videoEncoderCore2.mEncoder.start();
                 videoEncoderCore.mEncoder.start();
 
+
                 List<Surface> surfaces = new ArrayList<>();
+                surfaces.add(encoderSurface1);
                 surfaces.add(encoderSurface);
 
                 // Creating surface from texture to display my video
