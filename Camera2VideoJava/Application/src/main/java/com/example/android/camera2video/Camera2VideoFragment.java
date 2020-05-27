@@ -63,11 +63,14 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+
+import static java.lang.Thread.sleep;
 
 public class Camera2VideoFragment extends Fragment
         implements View.OnClickListener, FragmentCompat.OnRequestPermissionsResultCallback {
@@ -103,6 +106,10 @@ public class Camera2VideoFragment extends Fragment
     private static final String TAG = "Camera2VideoFragment";
     private static final int REQUEST_VIDEO_PERMISSIONS = 1;
     private static final String FRAGMENT_DIALOG = "dialog";
+
+    MediaCodec.BufferInfo mBufferInfo;
+
+    MediaCodec mMediaCodec;
 
     private static final String[] VIDEO_PERMISSIONS = {
             Manifest.permission.CAMERA,
@@ -337,7 +344,10 @@ public class Camera2VideoFragment extends Fragment
     void setupCapture() {
 
         if (sSelectedCamera == null)
-            sSelectedCamera = findCamera(CameraCharacteristics.LENS_FACING_BACK);
+            sSelectedCamera = findCamera(getFrontCameraId());
+
+//        int index = getFrontCameraId();
+//        Camera c = Camera.open(index);
         // if (mVideoInputThread != null)
         // if (mVideoInputThread.isAlive()) {
         // mVideoInputThread.close();
@@ -551,6 +561,15 @@ public class Camera2VideoFragment extends Fragment
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession session) {
                             mPreviewSession = session;
+                            try {
+                            mPreviewSession.stopRepeating();
+                            mPreviewSession.abortCaptures();
+
+
+                            sleep(100);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
                             updatePreview();
                         }
 
@@ -654,63 +673,63 @@ public class Camera2VideoFragment extends Fragment
                 + System.currentTimeMillis() + ".mp4";
     }
 
-    private void startRecordingVideo() {
-        if (null == mCameraDevice || !mTextureView.isAvailable() || null == mPreviewSize) {
-            return;
-        }
-        try {
-            closePreviewSession();
-            setUpMediaRecorder();
-            SurfaceTexture texture = mTextureView.getSurfaceTexture();
-            assert texture != null;
-            texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
-            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-            List<Surface> surfaces = new ArrayList<>();
-
-            // Set up Surface for the camera preview
-            Surface previewSurface = new Surface(texture);
-            surfaces.add(previewSurface);
-            mPreviewBuilder.addTarget(previewSurface);
-
-            // Set up Surface for the MediaRecorder
-            Surface recorderSurface = mMediaRecorder.getSurface();
-            surfaces.add(recorderSurface);
-            mPreviewBuilder.addTarget(recorderSurface);
-
-            // Start a capture session
-            // Once the session starts, we can update the UI and start recording
-            mCameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
-
-                @Override
-                public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
-                    mPreviewSession = cameraCaptureSession;
-                    updatePreview();
-                    getActivity().runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            // UI
-                            mButtonVideo.setText(R.string.stop);
-                            mIsRecordingVideo = true;
-
-                            // Start recording
-                            mMediaRecorder.start();
-                        }
-                    });
-                }
-
-                @Override
-                public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
-                    Activity activity = getActivity();
-                    if (null != activity) {
-                        Toast.makeText(activity, "Failed", Toast.LENGTH_SHORT).show();
-                    }
-                }
-            }, mBackgroundHandler);
-        } catch (CameraAccessException | IOException e) {
-            e.printStackTrace();
-        }
-
-    }
+//    private void startRecordingVideo() {
+//        if (null == mCameraDevice || !mTextureView.isAvailable() || null == mPreviewSize) {
+//            return;
+//        }
+//        try {
+//            closePreviewSession();
+//            setUpMediaRecorder();
+//            SurfaceTexture texture = mTextureView.getSurfaceTexture();
+//            assert texture != null;
+//            texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
+//            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+//            List<Surface> surfaces = new ArrayList<>();
+//
+//            // Set up Surface for the camera preview
+//            Surface previewSurface = new Surface(texture);
+//            surfaces.add(previewSurface);
+//            mPreviewBuilder.addTarget(previewSurface);
+//
+//            // Set up Surface for the MediaRecorder
+//            Surface recorderSurface = mMediaRecorder.getSurface();
+//            surfaces.add(recorderSurface);
+//            mPreviewBuilder.addTarget(recorderSurface);
+//
+//            // Start a capture session
+//            // Once the session starts, we can update the UI and start recording
+//            mCameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+//
+//                @Override
+//                public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+//                    mPreviewSession = cameraCaptureSession;
+//                    updatePreview();
+//                    getActivity().runOnUiThread(new Runnable() {
+//                        @Override
+//                        public void run() {
+//                            // UI
+//                            mButtonVideo.setText(R.string.stop);
+//                            mIsRecordingVideo = true;
+//
+//                            // Start recording
+//                            mMediaRecorder.start();
+//                        }
+//                    });
+//                }
+//
+//                @Override
+//                public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
+//                    Activity activity = getActivity();
+//                    if (null != activity) {
+//                        Toast.makeText(activity, "Failed", Toast.LENGTH_SHORT).show();
+//                    }
+//                }
+//            }, mBackgroundHandler);
+//        } catch (CameraAccessException | IOException e) {
+//            e.printStackTrace();
+//        }
+//
+//    }
 
     private void closePreviewSession() {
         if (mPreviewSession != null) {
@@ -964,7 +983,7 @@ public class Camera2VideoFragment extends Fragment
                 int timeWaited = 0;
                 while (mStatus != STATUS_CLOSED) {
                     if (timeWaited <= 5000) {
-                        Thread.sleep(10);
+                        sleep(10);
                         // Log.w("Camera wait", "waiting..");
                         timeWaited = timeWaited + 10;
                     } else {
@@ -989,21 +1008,21 @@ public class Camera2VideoFragment extends Fragment
 
                 android.util.Log.w(TAG, "+openVideoInput: " + cameraName);
 
-//                camera = Camera.open();
-//
-//                camera.setPreviewCallback(new Camera.PreviewCallback() {
-//                    @Override
-//                    public void onPreviewFrame(byte[] bytes, Camera camera) {
-//
-//                    }
-//                });
-//
-//                camera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
-//                    @Override
-//                    public void onPreviewFrame(byte[] bytes, Camera camera) {
-//
-//                    }
-//                });
+                camera = Camera.open();
+
+                camera.setPreviewCallback(new Camera.PreviewCallback() {
+                    @Override
+                    public void onPreviewFrame(byte[] bytes, Camera camera) {
+                        encode(bytes);
+                    }
+                });
+
+                camera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+                    @Override
+                    public void onPreviewFrame(byte[] bytes, Camera camera) {
+
+                    }
+                });
 
                 final CameraManager cameraManager = (CameraManager) getActivity()
                         .getSystemService(Context.CAMERA_SERVICE);
@@ -1067,7 +1086,11 @@ public class Camera2VideoFragment extends Fragment
                 };
 
                 startBackgroundThread();
-                cameraManager.openCamera(cameraName, stateCallback, mBackgroundHandler);
+
+//                cameraManager.openCamera(cameraName, stateCallback, mBackgroundHandler);
+
+//                int index = getFrontCameraId();
+//                Camera.open(index);
                 // cameraManager.openCamera(cameraName, stateCallback, null);
 
                 // try {
@@ -1080,7 +1103,7 @@ public class Camera2VideoFragment extends Fragment
                 // opening.", e);
                 // }
 
-            } catch (SecurityException | NullPointerException | CameraAccessException ex) {
+            } catch (SecurityException | NullPointerException ex) {   ///catch (SecurityException | NullPointerException | CameraAccessException ex) {
                 android.util.Log.e(TAG, "Error in openVideoInput: " + android.util.Log.getStackTraceString(ex));
             }
         }
@@ -1244,6 +1267,16 @@ public class Camera2VideoFragment extends Fragment
                         mCameraCaptureSession = session;
                         try {
 
+//                            try {
+//                                mPreviewSession.stopRepeating();
+//                                mPreviewSession.abortCaptures();
+//
+//
+//                                sleep(100);
+//                            } catch (Exception e) {
+//                                e.printStackTrace();
+//                            }
+
                             setUpCaptureRequestBuilder(builder);
                             HandlerThread thread = new HandlerThread("CameraPreview");
                             thread.start();
@@ -1313,6 +1346,80 @@ public class Camera2VideoFragment extends Fragment
             android.util.Log.e("Video Call", "Error in findCamera: " + android.util.Log.getStackTraceString(ex));
             return null;
         }
+    }
+
+    int getFrontCameraId() {
+        Camera.CameraInfo ci = new Camera.CameraInfo();
+        for (int i = 0 ; i < Camera.getNumberOfCameras(); i++) {
+            Camera.getCameraInfo(i, ci);
+            if (ci.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) return i;
+        }
+        return -1; // No front-facing camera found
+    }
+
+    private void initCodec() {
+        try {
+            mBufferInfo = new MediaCodec.BufferInfo();
+            mMediaCodec = MediaCodec.createEncoderByType("video/avc");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        MediaFormat mediaFormat = MediaFormat.createVideoFormat("video/avc",
+                1920,
+                1080);
+        mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 125000);
+        mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
+        mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar);
+        mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+        mMediaCodec.configure(mediaFormat,
+                null,
+                null,
+                MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mMediaCodec.start();
+    }
+
+
+    private synchronized void encode(byte[] data) {
+        ByteBuffer[] inputBuffers = mMediaCodec.getInputBuffers();// here changes
+        ByteBuffer[] outputBuffers = mMediaCodec.getOutputBuffers();
+
+        int inputBufferIndex = mMediaCodec.dequeueInputBuffer(-1);
+        if (inputBufferIndex >= 0) {
+            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+            inputBuffer.clear();
+            inputBuffer.put(data);
+            mMediaCodec.queueInputBuffer(inputBufferIndex, 0, data.length, 0, 0);
+        } else {
+            return;
+        }
+
+        int outputBufferIndex = mMediaCodec.dequeueOutputBuffer(mBufferInfo, 10000);
+        do {
+            if (outputBufferIndex >= 0) {
+                ByteBuffer outBuffer = outputBuffers[outputBufferIndex];
+                System.out.println("buffer info-->" + mBufferInfo.offset + "--"
+                        + mBufferInfo.size + "--" + mBufferInfo.flags + "--"
+                        + mBufferInfo.presentationTimeUs);
+                byte[] outData = new byte[mBufferInfo.size];
+                outBuffer.get(outData);
+                if (mBufferInfo.offset != 0) {
+                    byte[] offsettedData;
+                    offsettedData = Arrays.copyOfRange(outData, mBufferInfo.offset, outData.length-1);
+//                    pushFrame(offsettedData, offsettedData.length);
+                } else {
+//                    pushFrame(outData, outData.length);
+                }
+                mMediaCodec.releaseOutputBuffer(outputBufferIndex, false);
+                outputBufferIndex = mMediaCodec.dequeueOutputBuffer(mBufferInfo,
+                        0);
+
+            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                outputBuffers = mMediaCodec.getOutputBuffers();
+            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                MediaFormat format = mMediaCodec.getOutputFormat();
+            }
+        } while (outputBufferIndex >= 0);
     }
 
 }
